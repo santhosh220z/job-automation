@@ -1,0 +1,35 @@
+# Python virtual environment
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.so
+.Python
+
+# Environment files
+.env
+*.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project data (credentials, generated resumes)
+data/credentials/
+data/resumes/*.pdf
+data/resumes/*.docx
+
+# Graphify output
+graphify-out/
+
+# Logs
+*.log

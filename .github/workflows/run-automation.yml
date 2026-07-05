@@ -1,0 +1,59 @@
+name: Job Application Automation
+
+on:
+  workflow_dispatch:
+    inputs:
+      keywords:
+        description: "Job search keywords (comma-separated)"
+        required: false
+        type: string
+      location:
+        description: "Job location"
+        required: false
+        type: string
+      max_applications:
+        description: "Max applications this run"
+        required: false
+        type: number
+        default: 10
+
+jobs:
+  run-automation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip -q
+          pip install -r requirements.txt -q
+          playwright install chromium --with-deps -q
+
+      - name: Decode resume
+        run: |
+          mkdir -p data/resumes
+          echo "${{ secrets.RESUME_BASE64 }}" | base64 -d > data/resumes/resume.pdf
+
+      - name: Decode Google credentials
+        run: |
+          mkdir -p data/credentials
+          echo "${{ secrets.GM_CREDENTIALS_JSON }}" > data/credentials/service_account.json
+          echo "${{ secrets.GM_TOKEN_JSON }}" > data/credentials/gmail_token.json
+
+      - name: Run automation
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LINKEDIN_USER: ${{ secrets.LINKEDIN_USER }}
+          LINKEDIN_PASS: ${{ secrets.LINKEDIN_PASS }}
+          INDEED_USER: ${{ secrets.INDEED_USER }}
+          INDEED_PASS: ${{ secrets.INDEED_PASS }}
+          WELLFOUND_USER: ${{ secrets.WELLFOUND_USER }}
+          WELLFOUND_PASS: ${{ secrets.WELLFOUND_PASS }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+        run: python src/main.py
