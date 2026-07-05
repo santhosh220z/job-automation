@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Job Apply Automation</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Job Apply Automation</h1>
+    <div class="stats-bar">
+      <div class="stat"><span class="stat-val">{{ stats.total }}</span> total</div>
+      <div class="stat"><span class="stat-val">{{ stats.applied }}</span> applied</div>
+      <div class="stat"><span class="stat-val">{{ stats.replied }}</span> replied</div>
+      <div class="stat"><span class="stat-val">{{ stats.interview }}</span> interview</div>
+    </div>
+  </header>
+
+  <main>
+    <div class="panel">
+      <h2>Run Configuration</h2>
+      <form id="run-form" onsubmit="triggerRun(event)">
+        <div class="row">
+          <label>
+            Keywords:
+            <input type="text" name="keywords" id="keywords" value="{{ keywords }}" placeholder="software engineer">
+          </label>
+          <label>
+            Location:
+            <input type="text" name="location" id="location" value="{{ location }}" placeholder="remote">
+          </label>
+          <label>
+            Max apps:
+            <input type="number" name="max_apps" id="max_apps" value="{{ max_apps }}" min="1" max="100">
+          </label>
+        </div>
+        <div class="row checkboxes">
+          <label><input type="checkbox" name="linkedin" checked> LinkedIn</label>
+          <label><input type="checkbox" name="indeed" checked> Indeed</label>
+          <label><input type="checkbox" name="wellfound" checked> Wellfound</label>
+        </div>
+        <div class="row">
+          <button type="submit" id="run-btn" class="btn-primary">Start Run</button>
+          <button type="button" onclick="checkReplies()" class="btn-secondary">Check Gmail Replies</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="panel log-panel">
+      <h2>Live Log <span id="log-status" class="dot disconnected"></span></h2>
+      <div id="log-output">
+        <span class="dim">Waiting for run...</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Applications <button onclick="refreshApps()" class="btn-refresh">Refresh</button></h2>
+      <div id="apps-table-container">
+        {% if applications %}
+        <table id="apps-table">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Company</th>
+              <th>Role</th>
+              <th>URL</th>
+              <th>Status</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for app in applications %}
+            <tr>
+              <td>{{ app.get("Timestamp", "") }}</td>
+              <td>{{ app.get("Company", "") }}</td>
+              <td>{{ app.get("Role", "") }}</td>
+              <td class="url-cell"><a href="{{ app.get('URL', '#') }}" target="_blank" title="{{ app.get('URL', '') }}">link</a></td>
+              <td>
+                {% set status = app.get("Status", "").lower() %}
+                <span class="badge badge-{{ status }}">
+                  {{ app.get("Status", "") }}
+                </span>
+              </td>
+              <td>{{ app.get("Notes", "") }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="dim">No applications tracked yet.</p>
+        {% endif %}
+      </div>
+    </div>
+  </main>
+
+  <script>
+    let evSource = null;
+
+    function connectSSE() {
+      if (evSource) {
+        evSource.close();
+        evSource = null;
+      }
+      evSource = new EventSource("/api/log-stream");
+      evSource.addEventListener("connected", () => {
+        document.getElementById("log-status").className = "dot connected";
+      });
+      evSource.addEventListener("error", () => {
+        document.getElementById("log-status").className = "dot disconnected";
+        // auto-reconnect after 3s
+        setTimeout(() => { if (!evSource || evSource.readyState === 2) connectSSE(); }, 3000);
+      });
+      evSource.addEventListener("message", (e) => {
+        const data = JSON.parse(e.data);
+        const logDiv = document.getElementById("log-output");
+        const line = document.createElement("div");
+        line.className = "log-line";
+        line.textContent = data.line;
+        logDiv.appendChild(line);
+        logDiv.scrollTop = logDiv.scrollHeight;
+      });
+      document.getElementById("log-status").className = "dot connecting";
+    }
+    connectSSE();
+
+    function triggerRun(e) {
+      e.preventDefault();
+      const btn = document.getElementById("run-btn");
+      btn.disabled = true;
+      btn.textContent = "Running...";
+
+      const form = document.getElementById("run-form");
+      const fd = new FormData(form);
+
+      fetch("/api/run", { method: "POST", body: fd })
+        .then(r => r.json())
+        .then(data => {
+          if (data.error) {
+            const logDiv = document.getElementById("log-output");
+            const line = document.createElement("div");
+            line.className = "log-line error";
+            line.textContent = data.error;
+            logDiv.appendChild(line);
+          }
+        })
+        .catch(err => {
+          const logDiv = document.getElementById("log-output");
+          const line = document.createElement("div");
+          line.className = "log-line error";
+          line.textContent = "Error: " + err;
+          logDiv.appendChild(line);
+        })
+        .finally(() => {
+          setTimeout(() => {
+            btn.disabled = false;
+            btn.textContent = "Start Run";
+            refreshApps();
+          }, 3000);
+        });
+    }
+
+    function checkReplies() {
+      fetch("/api/check-replies", { method: "POST" })
+        .then(() => setTimeout(refreshApps, 5000));
+    }
+
+    async function refreshApps() {
+      const resp = await fetch("/api/applications");
+      const data = await resp.json();
+      const container = document.getElementById("apps-table-container");
+      if (!data.applications.length) {
+        container.innerHTML = '<p class="dim">No applications tracked yet.</p>';
+        return;
+      }
+      let html =
+        '<table id="apps-table"><thead><tr><th>Timestamp</th><th>Company</th><th>Role</th><th>URL</th><th>Status</th><th>Notes</th></tr></thead><tbody>';
+      for (const app of data.applications) {
+        const status = (app.Status || "").toLowerCase();
+        const badgeClass = ["applied","replied","interview","rejected"].includes(status) ? status : "other";
+        html += `<tr>
+          <td>${app.Timestamp || ""}</td>
+          <td>${app.Company || ""}</td>
+          <td>${app.Role || ""}</td>
+          <td class="url-cell"><a href="${app.URL || "#"}" target="_blank" title="${app.URL || ""}">link</a></td>
+          <td><span class="badge badge-${badgeClass}">${app.Status || ""}</span></td>
+          <td>${app.Notes || ""}</td>
+        </tr>`;
+      }
+      html += "</tbody></table>";
+      container.innerHTML = html;
+      updateStats(data.applications);
+    }
+
+    function updateStats(apps) {
+      const total = apps.length;
+      const applied = apps.filter(a => (a.Status || "").toLowerCase() === "applied").length;
+      const replied = apps.filter(a => (a.Status || "").toLowerCase() === "replied").length;
+      const interview = apps.filter(a => (a.Status || "").toLowerCase() === "interview").length;
+      const vals = document.querySelectorAll(".stat-val");
+      if (vals.length >= 4) {
+        vals[0].textContent = total;
+        vals[1].textContent = applied;
+        vals[2].textContent = replied;
+        vals[3].textContent = interview;
+      }
+    }
+  </script>
+</body>
+</html>

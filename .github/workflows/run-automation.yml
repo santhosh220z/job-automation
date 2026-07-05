@@ -4,56 +4,82 @@ on:
   workflow_dispatch:
     inputs:
       keywords:
-        description: "Job search keywords (comma-separated)"
+        description: 'Job search keywords (comma-separated)'
         required: false
-        type: string
+        default: 'software engineer'
       location:
-        description: "Job location"
+        description: 'Location filter'
         required: false
-        type: string
+        default: 'remote'
       max_applications:
-        description: "Max applications this run"
+        description: 'Max applications per run'
         required: false
-        type: number
-        default: 10
+        default: '10'
 
 jobs:
-  run-automation:
+  run:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    timeout-minutes: 120
 
-      - name: Set up Python
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip -q
-          pip install -r requirements.txt -q
-          playwright install chromium --with-deps -q
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
 
-      - name: Decode resume
+      - name: Write .env from secrets
+        run: |
+          cat > .env << 'EOF'
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+          LINKEDIN_USER=${{ secrets.LINKEDIN_USER }}
+          LINKEDIN_PASS=${{ secrets.LINKEDIN_PASS }}
+          INDEED_USER=${{ secrets.INDEED_USER }}
+          INDEED_PASS=${{ secrets.INDEED_PASS }}
+          WELLFOUND_USER=${{ secrets.WELLFOUND_USER }}
+          WELLFOUND_PASS=${{ secrets.WELLFOUND_PASS }}
+          SHEET_ID=${{ secrets.SHEET_ID }}
+          SEARCH_KEYWORDS=${{ github.event.inputs.keywords }}
+          SEARCH_LOCATION=${{ github.event.inputs.location }}
+          MAX_APPLICATIONS_PER_RUN=${{ github.event.inputs.max_applications }}
+          RESUME_PATH=resume.pdf
+          EOF
+
+      - name: Decode base resume
+        env:
+          RESUME_BASE64: ${{ secrets.RESUME_BASE64 }}
         run: |
           mkdir -p data/resumes
-          echo "${{ secrets.RESUME_BASE64 }}" | base64 -d > data/resumes/resume.pdf
+          echo "$RESUME_BASE64" | base64 -d > data/resumes/resume.pdf
 
       - name: Decode Google credentials
+        env:
+          GM_CREDENTIALS_BASE64: ${{ secrets.GM_CREDENTIALS_BASE64 }}
+          GM_TOKEN_BASE64: ${{ secrets.GM_TOKEN_BASE64 }}
         run: |
           mkdir -p data/credentials
-          echo "${{ secrets.GM_CREDENTIALS_JSON }}" > data/credentials/service_account.json
-          echo "${{ secrets.GM_TOKEN_JSON }}" > data/credentials/gmail_token.json
+          echo "$GM_CREDENTIALS_BASE64" | base64 -d > data/credentials/service_account.json
+          echo "$GM_TOKEN_BASE64" | base64 -d > data/credentials/gmail_token.json
 
       - name: Run automation
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          LINKEDIN_USER: ${{ secrets.LINKEDIN_USER }}
-          LINKEDIN_PASS: ${{ secrets.LINKEDIN_PASS }}
-          INDEED_USER: ${{ secrets.INDEED_USER }}
-          INDEED_PASS: ${{ secrets.INDEED_PASS }}
-          WELLFOUND_USER: ${{ secrets.WELLFOUND_USER }}
-          WELLFOUND_PASS: ${{ secrets.WELLFOUND_PASS }}
-          SHEET_ID: ${{ secrets.SHEET_ID }}
         run: python src/main.py
+
+      - name: Check Gmail replies
+        run: python -c "from src.tracking.email_monitor import check_for_replies, mark_as_read; replies = check_for_replies(); print(f'Found {len(replies)} unread replies')"
