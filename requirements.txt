@@ -14,6 +14,7 @@ fpdf2>=2.7.0
 # LLM
 openai>=1.12.0
 anthropic>=0.30.0
+google-genai>=1.0.0
 
 # Google APIs
 gspread>=6.1.0

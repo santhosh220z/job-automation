@@ -13,6 +13,7 @@ RESUME_PATH = RESUMES_DIR / os.getenv("RESUME_PATH", "resume.pdf")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
 LINKEDIN_USER = os.getenv("LINKEDIN_USER", "")
 LINKEDIN_PASS = os.getenv("LINKEDIN_PASS", "")
@@ -26,7 +27,7 @@ GM_TOKEN_PATH = CREDENTIALS_DIR / os.getenv("GM_TOKEN_FILE", "gmail_token.json")
 SHEET_ID = os.getenv("SHEET_ID", "")
 
 LLM_MATCH_THRESHOLD = float(os.getenv("LLM_MATCH_THRESHOLD", "0.6"))
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")
 
 SEARCH_KEYWORDS = os.getenv("SEARCH_KEYWORDS", "software engineer").split(",")
 SEARCH_LOCATION = os.getenv("SEARCH_LOCATION", "remote")

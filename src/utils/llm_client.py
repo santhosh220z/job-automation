@@ -3,19 +3,42 @@ from typing import Optional
 
 from openai import OpenAI
 from anthropic import Anthropic
+from google import genai
 
-from src.config import OPENAI_API_KEY, ANTHROPIC_API_KEY
+from src.config import OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY, LLM_PROVIDER
 
 
 class LLMClient:
     def __init__(self):
         self.openai_client: Optional[OpenAI] = None
         self.anthropic_client: Optional[Anthropic] = None
+        self.gemini_client: Optional[genai.Client] = None
 
         if OPENAI_API_KEY:
             self.openai_client = OpenAI(api_key=OPENAI_API_KEY)
         if ANTHROPIC_API_KEY:
             self.anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY)
+        if GOOGLE_API_KEY:
+            self.gemini_client = genai.Client(api_key=GOOGLE_API_KEY)
+
+        self._provider = LLM_PROVIDER
+
+    def _pick_provider(self, prefer_claude: bool) -> str:
+        if self._provider == "openai" and self.openai_client:
+            return "openai"
+        if self._provider == "anthropic" and self.anthropic_client:
+            return "anthropic"
+        if self._provider == "gemini" and self.gemini_client:
+            return "gemini"
+        if prefer_claude and self.anthropic_client:
+            return "anthropic"
+        if self.gemini_client:
+            return "gemini"
+        if self.openai_client:
+            return "openai"
+        if self.anthropic_client:
+            return "anthropic"
+        return "none"
 
     def analyze_match(self, resume_text: str, jd_text: str) -> dict:
         prompt = (
@@ -27,7 +50,7 @@ class LLMClient:
             "- 'reasoning': 2-3 sentence explanation of the score\n\n"
             f"--- RESUME ---\n{resume_text}\n\n--- JOB DESCRIPTION ---\n{jd_text}"
         )
-        return self._call_llm(prompt, use_claude=True)
+        return self._call_llm(prompt, prefer_claude=True)
 
     def tailor_resume(self, resume_text: str, jd_text: str, analysis: dict) -> str:
         missing = ", ".join(analysis.get("missing_skills", []))
@@ -40,23 +63,27 @@ class LLMClient:
             "Output the rewritten resume in plain text markdown format.\n\n"
             f"--- RESUME ---\n{resume_text}\n\n--- JOB DESCRIPTION ---\n{jd_text}"
         )
-        return self._call_llm_text(prompt, use_claude=False)
+        return self._call_llm_text(prompt, prefer_claude=False)
 
-    def _call_llm(self, prompt: str, use_claude: bool = True) -> dict:
-        if use_claude and self.anthropic_client:
+    def _call_llm(self, prompt: str, prefer_claude: bool = True) -> dict:
+        provider = self._pick_provider(prefer_claude)
+        if provider == "anthropic":
             return self._call_claude(prompt)
-        if self.openai_client:
+        elif provider == "gemini":
+            return self._call_gemini_json(prompt)
+        elif provider == "openai":
             return self._call_openai(prompt)
         return {"score": 0.5, "matching_skills": [], "missing_skills": [], "reasoning": "No LLM configured"}
 
-    def _call_llm_text(self, prompt: str, use_claude: bool = True) -> str:
-        if use_claude and self.anthropic_client:
-            resp = self._call_claude_raw(prompt)
-            return resp
-        if self.openai_client:
-            resp = self._call_openai_raw(prompt)
-            return resp
-        return resume_text  # passthrough if no LLM
+    def _call_llm_text(self, prompt: str, prefer_claude: bool = True) -> str:
+        provider = self._pick_provider(prefer_claude)
+        if provider == "anthropic":
+            return self._call_claude_raw(prompt)
+        elif provider == "gemini":
+            return self._call_gemini_raw(prompt)
+        elif provider == "openai":
+            return self._call_openai_raw(prompt)
+        return ""
 
     def _call_openai(self, prompt: str) -> dict:
         resp = self.openai_client.chat.completions.create(
@@ -95,3 +122,32 @@ class LLMClient:
             messages=[{"role": "user", "content": prompt}],
         )
         return resp.content[0].text
+
+    def _call_gemini_json(self, prompt: str) -> dict:
+        resp = self.gemini_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config={
+                "temperature": 0.2,
+                "response_mime_type": "application/json",
+                "response_schema": {
+                    "type": "object",
+                    "properties": {
+                        "score": {"type": "number"},
+                        "matching_skills": {"type": "array", "items": {"type": "string"}},
+                        "missing_skills": {"type": "array", "items": {"type": "string"}},
+                        "reasoning": {"type": "string"},
+                    },
+                    "required": ["score", "matching_skills", "missing_skills", "reasoning"],
+                },
+            },
+        )
+        return json.loads(resp.text)
+
+    def _call_gemini_raw(self, prompt: str) -> str:
+        resp = self.gemini_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config={"temperature": 0.3},
+        )
+        return resp.text
